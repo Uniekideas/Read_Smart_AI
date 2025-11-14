@@ -10,8 +10,6 @@ pandas
 langchain-text-splitters
 
 
-
-faiss-cpu
 wikipedia
 sentence-transformers
 transformers
