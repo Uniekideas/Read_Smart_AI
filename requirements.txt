@@ -7,6 +7,20 @@ PyPDF2
 google-ai-generativelanguage
 langchain-community
 pandas
+streamlit
+langchain
+langchain-core
+langchain-community
+langchain-google-genai
+langchain-text-splitters
+faiss-cpu
+PyPDF2
+google-ai-generativelanguage
+pandas
+
+wikipedia
+sentence-transformers
+transformers
 
 
 faiss-cpu
