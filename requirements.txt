@@ -1,11 +1,8 @@
 streamlit
-PyPDF2
-faiss-cpu
 langchain
-google-generativeai
+faiss-cpu 
 langchain-core
 langchain-google-genai 
-langchain-text-splitters
 PyPDF2
 google-ai-generativelanguage
 langchain-community
