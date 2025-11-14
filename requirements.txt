@@ -1,13 +1,13 @@
 streamlit
-langchain==0.2.12
+langchain
 faiss-cpu
 langchain-core==0.2.6
-langchain-google-genai==1.0.6
+langchain-google-genai
 PyPDF2
 google-ai-generativelanguage
-langchain-community==0.2.6
+langchain-community
 pandas
-langchain-text-splitters==0.2.2
+langchain-text-splitters
 
 
 wikipedia
