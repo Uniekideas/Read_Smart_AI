@@ -4,12 +4,15 @@ from datetime import datetime
 import pandas as pd
 import base64
 
-# LangChain (correct imports for v0.2+)
+# LangChain imports (correct for v0.2+)
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
+
+# NEW retrieval chain imports
 from langchain_core.prompts import PromptTemplate
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_retrieval_chain
 
 
 # -----------------------------
@@ -48,15 +51,16 @@ def build_vectorstore(chunks, api_key):
 
 
 # -----------------------------
-# QA Chain
+# Build Retrieval Chain
 # -----------------------------
 def build_qa_chain(api_key, vectorstore):
+
     prompt = PromptTemplate(
         input_variables=["context", "question"],
         template="""
-You are a highly accurate assistant. Answer using ONLY the context below.
+You must answer ONLY using the provided context.
 
-If the answer is not in the context, reply:
+If the answer is not found in the context, respond:
 "Answer is not available in the provided context."
 
 Context:
@@ -75,12 +79,19 @@ Answer:
         temperature=0.2
     )
 
-    return RetrievalQA.from_chain_type(
+    # Stuff chain (for merging docs)
+    document_chain = create_stuff_documents_chain(
         llm=model,
-        retriever=vectorstore.as_retriever(),
-        chain_type="stuff",
-        chain_type_kwargs={"prompt": prompt}
+        prompt=prompt
     )
+
+    # Retrieval chain (search + LLM)
+    retrieval_chain = create_retrieval_chain(
+        retriever=vectorstore.as_retriever(),
+        combine_docs_chain=document_chain
+    )
+
+    return retrieval_chain
 
 
 # -----------------------------
@@ -107,18 +118,18 @@ def main():
 
     if st.sidebar.button("Process PDFs"):
         if not pdf_docs:
-            st.sidebar.warning("Upload at least one PDF")
+            st.sidebar.warning("Upload a PDF")
         else:
             with st.spinner("Processing..."):
                 text = extract_pdf_text(pdf_docs)
                 chunks = chunk_text(text)
                 st.session_state.vectorstore = build_vectorstore(chunks, api_key)
-            st.sidebar.success("PDFs processed successfully!")
+            st.sidebar.success("PDFs indexed successfully!")
 
     st.write("---")
 
     # Question input
-    question = st.text_input("Ask a question about your PDFs")
+    question = st.text_input("Ask a question about your documents:")
 
     if question:
         if "vectorstore" not in st.session_state:
@@ -126,10 +137,12 @@ def main():
             st.stop()
 
         qa_chain = build_qa_chain(api_key, st.session_state.vectorstore)
-        response = qa_chain.run(question)
+        response = qa_chain.invoke({"question": question})
+
+        answer = response["answer"]
 
         st.session_state.history.append(
-            (question, response, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            (question, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         )
 
         st.markdown(
@@ -137,7 +150,7 @@ def main():
             unsafe_allow_html=True
         )
         st.markdown(
-            f"<div style='padding:1rem;background:#3d4250;border-radius:8px;color:white;'><b>AI:</b> {response}</div>",
+            f"<div style='padding:1rem;background:#3d4250;border-radius:8px;color:white;'><b>AI:</b> {answer}</div>",
             unsafe_allow_html=True
         )
 
@@ -145,13 +158,7 @@ def main():
     if len(st.session_state.history) > 0:
         df = pd.DataFrame(st.session_state.history, columns=["Question", "Answer", "Timestamp"])
         csv = df.to_csv(index=False)
-
-        st.download_button(
-            "Download conversation history",
-            csv,
-            "history.csv",
-            "text/csv"
-        )
+        st.download_button("Download session history", csv, "history.csv")
 
 
 if __name__ == "__main__":
