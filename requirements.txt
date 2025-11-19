@@ -1,15 +1,14 @@
 streamlit
 PyPDF2
 pandas
-
 langchain
 langchain-core
+langchain-text-splitters
 langchain-community
 langchain-google-genai
-langchain-text-splitters
-
 google-generativeai
 faiss-cpu
+python-dotenv
 
 sentence-transformers
 transformers
