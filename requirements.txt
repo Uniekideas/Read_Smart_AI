@@ -1,15 +1,21 @@
-streamlit
-langchain
-faiss-cpu 
-langchain-core
-langchain-google-genai 
-PyPDF2
-google-ai-generativelanguage
-langchain-community
-pandas
+streamlit==1.32.0
+PyPDF2==3.0.1
+pandas==2.1.4
 
+# LangChain ecosystem (exact versions that match your app.py)
+langchain==0.1.14
+langchain-core==0.1.40
+langchain-community==0.0.28
+langchain-google-genai==0.0.9
+langchain-text-splitters==0.0.1
 
-faiss-cpu
-wikipedia
-sentence-transformers
-transformers
+# Google Gemini API
+google-generativeai==0.3.2
+
+# Vector DB
+faiss-cpu==1.7.4
+
+# Extra utilities (optional but safe)
+sentence-transformers==2.3.1
+transformers==4.36.2
+wikipedia==1.4.0
