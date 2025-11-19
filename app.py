@@ -1,14 +1,13 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 
-# LangChain imports that match YOUR installed packages
+# Correct LangChain imports for these versions
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
 from langchain_community.chains import RetrievalQA
-from langchain_google_genai import ChatGoogleGenerativeAI
 
-# ---- STREAMLIT UI ----
+# Streamlit UI
 st.set_page_config(page_title="Read Smart AI", layout="wide")
 st.title("📘 Read Smart AI – PDF Question Answering")
 
@@ -25,11 +24,16 @@ if uploaded_file:
     st.success("PDF loaded successfully!")
 
     # Split text
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200
+    )
     chunks = text_splitter.split_text(text)
 
     # Embeddings
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001"
+    )
 
     # Vector store
     vector_store = FAISS.from_texts(chunks, embedding=embeddings)
@@ -37,7 +41,10 @@ if uploaded_file:
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 
     # Chat model
-    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.2)
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-pro",
+        temperature=0.2
+    )
 
     # RetrievalQA chain
     qa_chain = RetrievalQA.from_chain_type(
