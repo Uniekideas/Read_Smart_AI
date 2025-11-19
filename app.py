@@ -1,7 +1,7 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 
-# Correct LangChain imports for these versions
+# LangChain imports compatible with these versions
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
@@ -24,16 +24,11 @@ if uploaded_file:
     st.success("PDF loaded successfully!")
 
     # Split text
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200
-    )
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_text(text)
 
     # Embeddings
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001"
-    )
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
     # Vector store
     vector_store = FAISS.from_texts(chunks, embedding=embeddings)
@@ -41,10 +36,7 @@ if uploaded_file:
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 
     # Chat model
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-pro",
-        temperature=0.2
-    )
+    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.2)
 
     # RetrievalQA chain
     qa_chain = RetrievalQA.from_chain_type(
