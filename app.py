@@ -1,15 +1,20 @@
 import streamlit as st
 from PyPDF2 import PdfReader
+import google.generativeai as genai
 
-# Updated LangChain imports
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import Chroma
-from langchain_community.chains import RetrievalQA
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
+import os
 
 # Streamlit UI
 st.set_page_config(page_title="Read Smart AI", layout="wide")
 st.title("📘 Read Smart AI – PDF Question Answering")
+
+# Google API key
+GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY")
+genai.configure(api_key=GOOGLE_API_KEY)
 
 uploaded_file = st.file_uploader("Upload a PDF File", type=["pdf"])
 
@@ -22,37 +27,45 @@ if uploaded_file:
         if page_text:
             text += page_text
 
-    st.success("PDF loaded successfully! 🎉")
+    st.success("PDF loaded successfully!")
 
-    # Split text into chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    # Split into chunks
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200
+    )
     chunks = text_splitter.split_text(text)
 
-    # Embeddings
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    # Embeddings (HuggingFace works on Streamlit Cloud)
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-    # Vector store (Chroma instead of FAISS)
+    # Chroma vector store
     vector_store = Chroma.from_texts(chunks, embedding=embeddings)
-
-    # Retriever
     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 
-    # Chat model
-    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.2)
-
-    # Retrieval Q&A Chain
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=retriever,
-        chain_type="stuff"
-    )
-
-    # User question input
+    # User input
     query = st.text_input("Ask something about the PDF:")
 
     if query:
         with st.spinner("Thinking..."):
-            answer = qa_chain.run(query)
+            # Retrieve relevant chunks
+            docs = retriever.get_relevant_documents(query)
+            context = "\n\n".join([d.page_content for d in docs])
+
+            prompt = f"""
+You are a helpful assistant. Use ONLY the context below to answer the question.
+
+Context:
+{context}
+
+Question:
+{query}
+
+Answer:
+"""
+
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content(prompt)
 
         st.subheader("Answer:")
-        st.write(answer)
+        st.write(response.text)
