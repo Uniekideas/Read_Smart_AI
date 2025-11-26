@@ -186,7 +186,7 @@ for key, default in {"docs": [], "chunks": [], "meta": [], "store": None, "chat"
 # UI Setup
 # ------------------------------------------------
 st.set_page_config(page_title="Read Smart AI", layout="wide")
-st.title("📘 Read Smart AI — Stable v2")
+st.title("📘 Uniek Ideas - Read Smart AI")
 
 with st.sidebar:
     st.header("Upload PDF(s)")
