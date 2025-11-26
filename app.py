@@ -168,10 +168,47 @@ def ask_gemini(prompt):
         model="gemini-1.5-flash",
         prompt=prompt
     )
+
+    # Try multiple response shapes (object attributes or dicts)
     try:
-        return resp.candidates[0].content[0].text
-    except:
-        return str(resp)
+        # 1) Attribute-style response (SDK objects)
+        candidates = getattr(resp, "candidates", None)
+        if candidates:
+            first = candidates[0]
+            content = getattr(first, "content", None)
+            if content:
+                if isinstance(content, list) and len(content) > 0:
+                    piece = content[0]
+                    text = getattr(piece, "text", None)
+                    if text:
+                        return text
+                elif isinstance(content, str):
+                    return content
+
+        # 2) Dict-style response
+        if isinstance(resp, dict):
+            cand = resp.get("candidates")
+            if cand:
+                first = cand[0]
+                content = first.get("content")
+                if isinstance(content, list) and len(content) > 0:
+                    txt = content[0].get("text")
+                    if txt:
+                        return txt
+                if isinstance(content, str):
+                    return content
+
+        # 3) Fallbacks
+        if hasattr(resp, "text"):
+            return resp.text
+        if isinstance(resp, dict) and "output" in resp:
+            return str(resp["output"])
+
+    except Exception:
+        # swallow parsing errors and fall back to string conversion
+        pass
+
+    return str(resp)
 
 
 ###############################################
