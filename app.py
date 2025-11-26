@@ -1,240 +1,220 @@
+import os
 import streamlit as st
 from PyPDF2 import PdfReader
-import pandas as pd
-import base64
-import os
+import google.generativeai as genai
 
-# FIXED: Updated imports for LangChain
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains import StuffDocumentsChain, LLMChain  # Updated import
-from langchain.prompts import PromptTemplate
-from langchain.schema import Document  # Added for document handling
+from langchain_community.vectorstores import Chroma
 
-from datetime import datetime
+# ============================================================
+# CONFIG & SETUP
+# ============================================================
 
-def get_pdf_text(pdf_docs):
-    text = ""
-    for pdf in pdf_docs:
-        pdf_reader = PdfReader(pdf)
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-    return text
+st.set_page_config(page_title="📘 Read Smart AI", layout="wide")
+st.title("📘 Read Smart AI")
 
-def get_text_chunks(text, model_name):
-    if model_name == "Google AI":
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
-    chunks = text_splitter.split_text(text)
-    return chunks
+CHROMA_DIR = "./chroma_store"
 
-def get_vector_store(text_chunks, model_name, api_key=None):
-    if model_name == "Google AI":
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
-    return vector_store
+# ============================================================
+# GOOGLE GEMINI KEY
+# ============================================================
 
-def get_conversational_chain(model_name, vectorstore=None, api_key=None):
-    if model_name == "Google AI":
-        prompt_template = """
-        Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
-        provided context just say, "answer is not available in the context", don't provide the wrong answer also add bullet points and paragraphs to some response which requires\n\n
-        Context:\n {context}\n
-        Question: \n{question}\n
+def init_genai():
+    key = st.secrets.get("GEMINI_API_KEY", None)
+    if not key:
+        st.error("❌ GEMINI_API_KEY missing. Add it in Streamlit Secrets.")
+        return None
+    genai.configure(api_key=key)
+    return True
 
-        Answer:
-        """
-        model = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.5, google_api_key=api_key)
-        prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-        
-        # Create the chain using the new approach
-        llm_chain = LLMChain(llm=model, prompt=prompt)
-        stuff_chain = StuffDocumentsChain(
-            llm_chain=llm_chain,
-            document_variable_name="context"
-        )
-        return stuff_chain
 
-def user_input(user_question, model_name, api_key, pdf_docs, conversation_history):
-    if api_key is None or pdf_docs is None:
-        st.warning("Please upload PDF files and provide API key before processing.")
-        return
-    text_chunks = get_text_chunks(get_pdf_text(pdf_docs), model_name)
-    vector_store = get_vector_store(text_chunks, model_name, api_key)
-    user_question_output = ""
-    response_output = ""
-    if model_name == "Google AI":
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
-        new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
-        docs = new_db.similarity_search(user_question)
-        
-        # Convert to Document objects if needed
-        doc_objects = [Document(page_content=doc.page_content, metadata=doc.metadata) for doc in docs]
-        
-        chain = get_conversational_chain("Google AI", vectorstore=new_db, api_key=api_key)
-        
-        # Updated chain invocation
-        response = chain.invoke({"input_documents": doc_objects, "question": user_question})
-        
-        user_question_output = user_question
-        response_output = response['output_text']
-        pdf_names = [pdf.name for pdf in pdf_docs] if pdf_docs else []
-        conversation_history.append((user_question_output, response_output, model_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ", ".join(pdf_names)))
+# ============================================================
+# PDF LOADING
+# ============================================================
 
-    # Display the conversation history
-    st.markdown(
-        f"""
-        <style>
-            .chat-message {{
-                padding: 1.5rem;
-                border-radius: 0.5rem;
-                margin-bottom: 1rem;
-                display: flex;
-            }}
-            .chat-message.user {{
-                background-color: #2b313e;
-            }}
-            .chat-message.bot {{
-                background-color: #475063;
-            }}
-            .chat-message .avatar {{
-                width: 20%;
-            }}
-            .chat-message .avatar img {{
-                max-width: 78px;
-                max-height: 78px;
-                border-radius: 50%;
-                object-fit: cover;
-            }}
-            .chat-message .message {{
-                width: 80%;
-                padding: 0 1.5rem;
-                color: #fff;
-            }}
-            .chat-message .info {{
-                font-size: 0.8rem;
-                margin-top: 0.5rem;
-                color: #ccc;
-            }}
-        </style>
-        <div class="chat-message user">
-            <div class="avatar">
-                <img src="https://i.ibb.co/CKpTnWr/user-icon-2048x2048-ihoxz4vq.png">
-            </div>    
-            <div class="message">{user_question_output}</div>
-        </div>
-        <div class="chat-message bot">
-            <div class="avatar">
-                <img src="https://i.ibb.co/pvv9dmdS/langchain-logo.webp" >
-            </div>
-            <div class="message">{response_output}</div>
-            </div>
-            
-        """,
-        unsafe_allow_html=True
+def extract_pdf_text(files):
+    all_text = ""
+    for f in files:
+        reader = PdfReader(f)
+        for page in reader.pages:
+            all_text += page.extract_text() or ""
+    return all_text
+
+
+# ============================================================
+# TEXT SPLITTING
+# ============================================================
+
+def split_text(text):
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1200,
+        chunk_overlap=150
     )
-    
-    if len(conversation_history) == 1:
-        conversation_history = []
-    elif len(conversation_history) > 1 :
-        last_item = conversation_history[-1]
-        conversation_history.remove(last_item) 
-    for question, answer, model_name, timestamp, pdf_name in reversed(conversation_history):
-        st.markdown(
-            f"""
-            <div class="chat-message user">
-                <div class="avatar">
-                    <img src="https://i.ibb.co/CKpTnWr/user-icon-2048x2048-ihoxz4vq.png">
-                </div>    
-                <div class="message">{question}</div>
-            </div>
-            <div class="chat-message bot">
-                <div class="avatar">
-                    <img src="https://i.ibb.co/wNmYHsx/langchain-logo.webp" >
-                </div>
-                <div class="message">{answer}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    chunks = splitter.split_text(text)
+    metadata = [{"source": f"chunk_{i}"} for i in range(len(chunks))]
+    return chunks, metadata
 
-    if len(st.session_state.conversation_history) > 0:
-        df = pd.DataFrame(st.session_state.conversation_history, columns=["Question", "Answer", "Model", "Timestamp", "PDF Name"])
-        csv = df.to_csv(index=False)
-        b64 = base64.b64encode(csv.encode()).decode()
-        href = f'<a href="data:file/csv;base64,{b64}" download="conversation_history.csv"><button>Download conversation history as CSV file</button></a>'
-        st.sidebar.markdown(href, unsafe_allow_html=True)
-        st.markdown("To download the conversation, click the Download button on the left side at the bottom of the conversation.")
-    st.snow()
 
-def main():
-    st.set_page_config(page_title="Read_Smart_AI", page_icon=":books:")
-    st.header("Read_Smart_AI (v1) :books:")
+# ============================================================
+# BUILD VECTORSTORE (PERSISTENT)
+# ============================================================
 
-    if 'conversation_history' not in st.session_state:
-        st.session_state.conversation_history = []
-    
-    linkedin_profile_link = "https://www.linkedin.com/in/helloisrael/"
-    kaggle_profile_link = "https://www.kaggle.com/afolabiisrael/"
-    github_profile_link = "https://github.com/EasyTechp5/"
+def build_vectorstore(chunks, metadata):
+    if not init_genai():
+        return None
 
-    st.sidebar.markdown(
-        f"[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)]({linkedin_profile_link}) "
-        f"[![Kaggle](https://img.shields.io/badge/Kaggle-20BEFF?style=for-the-badge&logo=kaggle&logoColor=white)]({kaggle_profile_link}) "
-        f"[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)]({github_profile_link})"
+    embeddings = []
+    batch_size = 20
+
+    # Generate embeddings in batches
+    try:
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            resp = genai.embed_content(
+                model="models/text-embedding-004",
+                content=batch
+            )
+            embeddings.extend(resp["embedding"])
+    except Exception as e:
+        st.error(f"Embedding Error: {str(e)}")
+        return None
+
+    # Build persistent Chroma DB
+    vectorstore = Chroma(
+        collection_name="readsmart_collection",
+        embedding_function=None,
+        persist_directory=CHROMA_DIR
     )
 
-    model_name = st.sidebar.radio("Select the Model:", ("Google AI",))
+    vectorstore.add_embeddings(
+        embeddings=embeddings,
+        metadatas=metadata,
+        documents=chunks
+    )
 
-    api_key = None
+    vectorstore.persist()
+    return vectorstore
 
-    if model_name == "Google AI":
-        api_key = st.sidebar.text_input("Enter your Google API Key:", type="password")
-        st.sidebar.markdown("Click [here](https://ai.google.dev/) to get an API key.")
-        
-        if not api_key:
-            st.sidebar.warning("Please enter your Google API Key to proceed.")
-            return
 
-    with st.sidebar:
-        st.title("Menu:")
-        
-        col1, col2 = st.columns(2)
-        
-        reset_button = col2.button("Reset")
-        clear_button = col1.button("Rerun")
+# ============================================================
+# LOAD EXISTING VECTORSTORE
+# ============================================================
 
-        if reset_button:
-            st.session_state.conversation_history = []
-            st.session_state.user_question = None
-            api_key = None
-            pdf_docs = None
-            
+def load_vectorstore():
+    if not os.path.exists(CHROMA_DIR):
+        return None
+    try:
+        return Chroma(
+            collection_name="readsmart_collection",
+            embedding_function=None,
+            persist_directory=CHROMA_DIR
+        )
+    except:
+        return None
+
+
+# ============================================================
+# RAG QUERY
+# ============================================================
+
+def answer_question(vectorstore, query):
+    if not init_genai():
+        return "API key missing."
+
+    # Embed query
+    q_emb = genai.embed_content(
+        model="models/text-embedding-004",
+        content=query
+    )["embedding"]
+
+    # Search in vectorstore
+    docs = vectorstore.similarity_search_by_vector(q_emb, k=5)
+
+    context = "\n\n".join([d.page_content for d in docs])
+
+    prompt = f"""
+You are a helpful assistant. Answer the user question using ONLY the context below:
+
+CONTEXT:
+{context}
+
+QUESTION:
+{query}
+
+Provide a clear and concise answer.
+    """
+
+    model = genai.GenerativeModel("gemini-pro")
+    response = model.generate_content(prompt)
+    return response.text
+
+
+# ============================================================
+# PDF SUMMARY
+# ============================================================
+
+def summarize_text(text):
+    if not init_genai():
+        return "Missing API key."
+
+    model = genai.GenerativeModel("gemini-pro")
+    prompt = f"Summarize the following document in clear bullet points:\n\n{text}"
+    return model.generate_content(prompt).text
+
+
+# ============================================================
+# STREAMLIT UI
+# ============================================================
+
+# Sidebar
+st.sidebar.header("📁 Upload PDFs")
+
+pdf_files = st.sidebar.file_uploader(
+    "Upload one or multiple PDF files",
+    type=["pdf"],
+    accept_multiple_files=True
+)
+
+if st.sidebar.button("📌 Build Index"):
+    if not pdf_files:
+        st.sidebar.error("Upload PDFs first.")
+    else:
+        with st.spinner("Extracting text..."):
+            full_text = extract_pdf_text(pdf_files)
+
+        with st.spinner("Splitting text..."):
+            chunks, metadata = split_text(full_text)
+
+        with st.spinner("Generating embeddings & saving vectorstore..."):
+            store = build_vectorstore(chunks, metadata)
+
+        if store:
+            st.sidebar.success("✅ Vectorstore built & saved!")
         else:
-            if clear_button:
-                if 'user_question' in st.session_state:
-                    st.warning("The previous query will be discarded.")
-                    st.session_state.user_question = ""
-                    if len(st.session_state.conversation_history) > 0:
-                        st.session_state.conversation_history.pop()
-                else:
-                    st.warning("The question in the input will be queried again.")
+            st.sidebar.error("❌ Failed to build vectorstore.")
 
-        pdf_docs = st.file_uploader("Upload your PDF Files and Click on the Submit & Process Button", accept_multiple_files=True)
-        if st.button("Submit & Process"):
-            if pdf_docs:
-                with st.spinner("Processing..."):
-                    st.success("Done")
-            else:
-                st.warning("Please upload PDF files before processing.")
+# Load vectorstore (if exists)
+vectorstore = load_vectorstore()
 
-    user_question = st.text_input("Ask me Anything")
+# MAIN AREA
+st.subheader("💬 Ask Questions")
 
-    if user_question:
-        user_input(user_question, model_name, api_key, pdf_docs, st.session_state.conversation_history)
-        st.session_state.user_question = ""
+if vectorstore:
+    user_query = st.text_input("Ask something about your PDFs:")
+    if user_query:
+        with st.spinner("Thinking..."):
+            answer = answer_question(vectorstore, user_query)
+        st.write("### 🧠 Answer")
+        st.write(answer)
+else:
+    st.info("⚠ Build the index first in the sidebar.")
 
-if __name__ == "__main__":
-    main()
+# PDF SUMMARY SECTION
+st.subheader("📝 Generate PDF Summary")
+
+if pdf_files and st.button("Summarize PDF(s)"):
+    full_text = extract_pdf_text(pdf_files)
+    with st.spinner("Summarizing..."):
+        summary = summarize_text(full_text)
+    st.write("### Summary")
+    st.write(summary)
