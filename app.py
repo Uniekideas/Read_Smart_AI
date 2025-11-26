@@ -5,12 +5,13 @@ import base64
 import os
 
 # FIXED: Updated imports for LangChain
-from langchain_text_splitters import RecursiveCharacterTextSplitter  # Changed from langchain.text_splitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains.question_answering import load_qa_chain
+from langchain.chains import StuffDocumentsChain, LLMChain  # Updated import
 from langchain.prompts import PromptTemplate
+from langchain.schema import Document  # Added for document handling
 
 from datetime import datetime
 
@@ -39,16 +40,22 @@ def get_conversational_chain(model_name, vectorstore=None, api_key=None):
     if model_name == "Google AI":
         prompt_template = """
         Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
-        provided context just say, "answer is not available in the context", don't provide the wrong answer also add bullet points and paragraghps to some respose whhich requeires\n\n
-        Context:\n {context}?\n
+        provided context just say, "answer is not available in the context", don't provide the wrong answer also add bullet points and paragraphs to some response which requires\n\n
+        Context:\n {context}\n
         Question: \n{question}\n
 
         Answer:
         """
         model = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.5, google_api_key=api_key)
         prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-        chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
-        return chain
+        
+        # Create the chain using the new approach
+        llm_chain = LLMChain(llm=model, prompt=prompt)
+        stuff_chain = StuffDocumentsChain(
+            llm_chain=llm_chain,
+            document_variable_name="context"
+        )
+        return stuff_chain
 
 def user_input(user_question, model_name, api_key, pdf_docs, conversation_history):
     if api_key is None or pdf_docs is None:
@@ -62,8 +69,15 @@ def user_input(user_question, model_name, api_key, pdf_docs, conversation_histor
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
         new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
         docs = new_db.similarity_search(user_question)
+        
+        # Convert to Document objects if needed
+        doc_objects = [Document(page_content=doc.page_content, metadata=doc.metadata) for doc in docs]
+        
         chain = get_conversational_chain("Google AI", vectorstore=new_db, api_key=api_key)
-        response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
+        
+        # Updated chain invocation
+        response = chain.invoke({"input_documents": doc_objects, "question": user_question})
+        
         user_question_output = user_question
         response_output = response['output_text']
         pdf_names = [pdf.name for pdf in pdf_docs] if pdf_docs else []
@@ -177,7 +191,7 @@ def main():
     api_key = None
 
     if model_name == "Google AI":
-        api_key = st.sidebar.text_input("Enter your Google API Key:")
+        api_key = st.sidebar.text_input("Enter your Google API Key:", type="password")
         st.sidebar.markdown("Click [here](https://ai.google.dev/) to get an API key.")
         
         if not api_key:
