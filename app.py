@@ -275,4 +275,4 @@ if ask:
 
         st.session_state.chat.append({"role": "user", "text": query})
         st.session_state.chat.append({"role": "assistant", "text": answer})
-        st.experimental_rerun()
+        st.rerun()  # FIXED: Changed from st.experimental_rerun()
