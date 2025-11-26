@@ -1,318 +1,212 @@
-###############################################
-# READ SMART AI — FINAL STABLE VERSION (2025)
-# Works 100% on Streamlit Cloud
-# - Gemini embeddings
-# - Chroma persistent vectorstore
-# - NO langchain embedding functions
-# - NO deprecated APIs
-# - Direct Chroma collection writes
-###############################################
-
+import os
 import streamlit as st
 from PyPDF2 import PdfReader
 import google.generativeai as genai
-import os
-from datetime import datetime
-from textwrap import dedent
 
-# --- Correct LangChain imports that Streamlit Cloud supports ---
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 
-# --- optional exports ---
-try:
-    from docx import Document
-    HAS_DOCX = True
-except:
-    HAS_DOCX = False
+# ============================================================
+# CONFIG
+# ============================================================
 
-try:
-    from fpdf import FPDF
-    HAS_PDF = True
-except:
-    HAS_PDF = False
+st.set_page_config(page_title="📘 Read Smart AI", layout="wide")
+st.title("📘 Read Smart AI")
+
+CHROMA_DIR = "chroma_store"  # Works on Streamlit Cloud
 
 
-###############################################
-# INIT GEMINI
-###############################################
+# ============================================================
+# GOOGLE GENAI API KEY
+# ============================================================
+
 def init_genai():
-    key = st.secrets.get("GOOGLE_API_KEY")
+    key = st.secrets.get("GEMINI_API_KEY")
     if not key:
-        st.error("Missing GOOGLE_API_KEY in secrets.")
+        st.error("❌ Missing GEMINI_API_KEY in Streamlit Secrets.")
         return False
     genai.configure(api_key=key)
     return True
 
 
-###############################################
-# PDF → TEXT
-###############################################
-def pdf_to_text(file):
-    pages = []
-    reader = PdfReader(file)
-    for i, p in enumerate(reader.pages):
-        text = p.extract_text() or ""
-        if text.strip():
-            pages.append({"page": i + 1, "text": text})
-    return pages
+# ============================================================
+# PDF READER
+# ============================================================
+
+def extract_pdf_text(files):
+    text = ""
+    for f in files:
+        reader = PdfReader(f)
+        for page in reader.pages:
+            text += page.extract_text() or ""
+    return text
 
 
-###############################################
-# CREATE CHUNKS
-###############################################
-def chunk_documents(docs, chunk_size=1000, chunk_overlap=200):
+# ============================================================
+# TEXT SPLITTING
+# ============================================================
+
+def split_text(text):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
+        chunk_size=1200,
+        chunk_overlap=150
     )
-
-    chunks, metadata = [], []
-
-    for d in docs:
-        splits = splitter.split_text(d["text"])
-        for idx, s in enumerate(splits):
-            chunks.append(s)
-            metadata.append({
-                "source": d["name"],
-                "page": d["page"],
-                "chunk": idx
-            })
-
+    chunks = splitter.split_text(text)
+    metadata = [{"source": f"chunk_{i}"} for i in range(len(chunks))]
     return chunks, metadata
 
 
-###############################################
-# GEMINI EMBEDDING (batch)
-###############################################
-def embed_batch(texts):
-    resp = genai.embed_content(
-        model="models/text-embedding-004",
-        content=texts
-    )
-    return resp["embedding"]
-
-
-###############################################
-# BUILD VECTORSTORE (PERSISTENT)
-###############################################
-CHROMA_DIR = "./chroma_store"
+# ============================================================
+# BUILD VECTORSTORE
+# ============================================================
 
 def build_vectorstore(chunks, metadata):
     if not init_genai():
         return None
 
-    # Clean or create DB directory
-    os.makedirs(CHROMA_DIR, exist_ok=True)
-
-    # Create vectorstore WITHOUT embedding function
-    store = Chroma(
-        collection_name="readsmart",
-        embedding_function=None,
-        persist_directory=CHROMA_DIR
-    )
-
-    # --- clear existing for rebuild ---
-    store.delete_collection()
-    store = Chroma(
-        collection_name="readsmart",
-        embedding_function=None,
-        persist_directory=CHROMA_DIR
-    )
-
-    # --- embed chunks in batches ---
     embeddings = []
     batch_size = 20
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i:i + batch_size]
-        emb = embed_batch(batch)
-        embeddings.extend(emb)
 
-    # --- DIRECT WRITE TO CHROMA COLLECTION ---
-    store._collection.add(
-        ids=[f"id_{i}" for i in range(len(embeddings))],
-        embeddings=embeddings,
-        documents=chunks,
-        metadatas=metadata
-    )
-
-    store.persist()
-    return store
-
-
-###############################################
-# RETRIEVAL
-###############################################
-def retrieve(store, query, k=4):
-    q_emb = embed_batch([query])[0]
-    results = store._collection.query(
-        query_embeddings=[q_emb],
-        n_results=k
-    )
-
-    docs = []
-    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-        docs.append({
-            "text": doc,
-            "meta": meta
-        })
-
-    return docs
-
-
-###############################################
-# GEMINI LLM
-###############################################
-def ask_gemini(prompt):
-    resp = genai.generate(
-        model="gemini-1.5-flash",
-        prompt=prompt
-    )
     try:
-        return resp.candidates[0].content[0].text
-    except:
-        return str(resp)
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            resp = genai.embed_content(
+                model="models/text-embedding-004",
+                content=batch
+            )
+            embeddings.extend(resp["embedding"])
+    except Exception as e:
+        st.error(f"Embedding error: {e}")
+        return None
+
+    vectorstore = Chroma(
+        collection_name="readsmart_collection",
+        embedding_function=None,
+        persist_directory=CHROMA_DIR
+    )
+
+    vectorstore.add_embeddings(
+        embeddings=embeddings,
+        metadatas=metadata,
+        documents=chunks
+    )
+
+    vectorstore.persist()
+    return vectorstore
 
 
-###############################################
-# STREAMLIT STATE
-###############################################
-for key, default in {
-    "docs": [],
-    "chunks": [],
-    "meta": [],
-    "store": None,
-    "chat": []
-}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
+# ============================================================
+# LOAD VECTORSTORE
+# ============================================================
 
-
-###############################################
-# UI
-###############################################
-st.set_page_config(page_title="Read Smart AI", layout="wide")
-st.title("📘 Read Smart AI — Stable Version")
-
-
-###############################################
-# SIDEBAR
-###############################################
-with st.sidebar:
-    st.header("Upload PDFs")
-    files = st.file_uploader("Upload", type="pdf", accept_multiple_files=True)
-
-    st.subheader("Settings")
-    cs = st.number_input("Chunk size", 256, 4000, 1000, 128)
-    co = st.number_input("Chunk overlap", 0, 1000, 200, 50)
-    topk = st.slider("Top-K", 1, 10, 4)
-
-    st.subheader("Actions")
-    btn_build = st.button("Build Index")
-    btn_clear = st.button("Clear All")
-
-
-###############################################
-# LOAD DOCUMENTS
-###############################################
-if files:
-    pages = []
-    for f in files:
-        extracted = pdf_to_text(f)
-        for p in extracted:
-            pages.append({"name": f.name, "page": p["page"], "text": p["text"]})
-
-    st.session_state.docs = pages
-    st.success(f"Loaded {len(pages)} pages.")
-
-
-###############################################
-# CLEAR
-###############################################
-if btn_clear:
-    st.session_state.docs = []
-    st.session_state.store = None
-    st.session_state.chunks = []
-    st.session_state.meta = []
-    st.session_state.chat = []
-    st.success("Cleared.")
-
-
-###############################################
-# BUILD INDEX
-###############################################
-if btn_build:
-    if not st.session_state.docs:
-        st.warning("Upload PDFs first.")
-    else:
-        with st.spinner("Indexing..."):
-            chunks, meta = chunk_documents(st.session_state.docs, cs, co)
-            st.session_state.chunks = chunks
-            st.session_state.meta = meta
-            st.session_state.store = build_vectorstore(chunks, meta)
-        st.success(f"Indexed {len(chunks)} chunks.")
-
-
-###############################################
-# MAIN CHAT UI
-###############################################
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    st.subheader("Chat")
-
-    # show history
-    for c in st.session_state.chat:
-        bg = "#e8f0ff" if c["role"] == "user" else "#f6f6f6"
-        st.markdown(
-            f"<div style='background:{bg}; padding:10px; border-radius:8px; margin:5px 0'>{c['text']}</div>",
-            unsafe_allow_html=True
+def load_vectorstore():
+    if not os.path.exists(CHROMA_DIR):
+        return None
+    try:
+        return Chroma(
+            collection_name="readsmart_collection",
+            embedding_function=None,
+            persist_directory=CHROMA_DIR
         )
+    except:
+        return None
 
-    query = st.text_input("Ask anything about your PDFs:")
-    ask_btn = st.button("Ask")
+
+# ============================================================
+# RAG QUERY
+# ============================================================
+
+def answer_question(vectorstore, query):
+    if not init_genai():
+        return "API key missing."
+
+    q_emb = genai.embed_content(
+        model="models/text-embedding-004",
+        content=query
+    )["embedding"]
+
+    docs = vectorstore.similarity_search_by_vector(q_emb, k=5)
+    context = "\n\n".join([d.page_content for d in docs])
+
+    prompt = f"""
+Use ONLY the context below to answer:
+
+CONTEXT:
+{context}
+
+QUESTION:
+{query}
+"""
+
+    model = genai.GenerativeModel("gemini-pro")
+    response = model.generate_content(prompt)
+    return response.text
 
 
-with col2:
-    st.subheader("Uploaded Pages")
-    if st.session_state.docs:
-        for d in st.session_state.docs:
-            st.write(f"- **{d['name']}** (p{d['page']})")
+# ============================================================
+# SUMMARY
+# ============================================================
+
+def summarize_text(text):
+    if not init_genai():
+        return "Missing API key."
+
+    model = genai.GenerativeModel("gemini-pro")
+    prompt = f"Summarize this in clear bullet points:\n\n{text}"
+    return model.generate_content(prompt).text
+
+
+# ============================================================
+# UI
+# ============================================================
+
+st.sidebar.header("📁 Upload PDFs")
+
+pdf_files = st.sidebar.file_uploader(
+    "Upload one or multiple PDF files",
+    type=["pdf"],
+    accept_multiple_files=True
+)
+
+if st.sidebar.button("📌 Build Index"):
+    if not pdf_files:
+        st.sidebar.error("Upload PDFs first.")
     else:
-        st.info("No documents.")
+        with st.spinner("Extracting text..."):
+            full_text = extract_pdf_text(pdf_files)
 
+        with st.spinner("Splitting text..."):
+            chunks, metadata = split_text(full_text)
 
-###############################################
-# HANDLE QUESTION
-###############################################
-if ask_btn:
-    if not query.strip():
-        st.warning("Enter a question.")
-    elif not st.session_state.store:
-        st.warning("Build index first.")
-    else:
-        docs = retrieve(st.session_state.store, query, topk)
+        with st.spinner("Creating embeddings..."):
+            store = build_vectorstore(chunks, metadata)
 
-        context = "\n\n---\n\n".join([
-            f"Source: {d['meta']['source']} (page {d['meta']['page']})\n{d['text']}"
-            for d in docs
-        ])
+        if store:
+            st.sidebar.success("✔ Vectorstore built!")
+        else:
+            st.sidebar.error("Failed to build vectorstore.")
 
-        prompt = dedent(f"""
-        Answer the following question using ONLY the context.
+vectorstore = load_vectorstore()
 
-        CONTEXT:
-        {context}
+# QUESTIONS
+st.subheader("💬 Ask Questions")
 
-        QUESTION:
-        {query}
-
-        ANSWER:
-        """)
-
+if vectorstore:
+    user_q = st.text_input("Ask something:")
+    if user_q:
         with st.spinner("Thinking..."):
-            answer = ask_gemini(prompt)
+            answer = answer_question(vectorstore, user_q)
+        st.write("### 🧠 Answer")
+        st.write(answer)
+else:
+    st.info("⚠ Build the index first in the sidebar.")
 
-        st.session_state.chat.append({"role": "user", "text": query})
-        st.session_state.chat.append({"role": "assistant", "text": answer})
-        st.experimental_rerun()
+# SUMMARY
+st.subheader("📝 Generate Summary")
+
+if pdf_files and st.button("Summarize PDF(s)"):
+    full_text = extract_pdf_text(pdf_files)
+    with st.spinner("Summarizing..."):
+        summary = summarize_text(full_text)
+    st.write("### Summary")
+    st.write(summary)

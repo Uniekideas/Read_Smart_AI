@@ -3,6 +3,7 @@ chromadb
 langchain-text-splitters
 langchain-community
 PyPDF2
+
 streamlit
 pandas
 python-docx
@@ -15,3 +16,5 @@ langchain-community
 langchain-text-splitters
 fpdf
 python-docx
+pysqlite3-binary
+langchain
