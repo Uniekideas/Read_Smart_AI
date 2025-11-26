@@ -161,17 +161,15 @@ def retrieve(store, query, k=4):
 
 
 ###############################################
-# GEMINI LLM
+# GEMINI LLM - FIXED VERSION
 ###############################################
 def ask_gemini(prompt):
-    resp = genai.generate(
-        model="gemini-1.5-flash",
-        prompt=prompt
-    )
-    try:
-        return resp.candidates[0].content[0].text
-    except:
-        return str(resp)
+    """
+    Use the correct Gemini API call for text generation
+    """
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content(prompt)
+    return response.text
 
 
 ###############################################
@@ -315,4 +313,4 @@ if ask_btn:
 
         st.session_state.chat.append({"role": "user", "text": query})
         st.session_state.chat.append({"role": "assistant", "text": answer})
-        st.experimental_rerun()
+        st.rerun()
