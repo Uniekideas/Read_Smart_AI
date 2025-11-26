@@ -16,5 +16,3 @@ langchain-community
 langchain-text-splitters
 fpdf
 python-docx
-pysqlite3-binary
-langchain
