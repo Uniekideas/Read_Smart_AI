@@ -2,22 +2,15 @@ import streamlit as st
 from PyPDF2 import PdfReader
 import pandas as pd
 import base64
-
 import os
 
-# Update imports for LangChain
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+# FIXED: Updated imports for LangChain
+from langchain_text_splitters import RecursiveCharacterTextSplitter  # Changed from langchain.text_splitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
-
 from langchain_google_genai import ChatGoogleGenerativeAI
-
-
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
-
-
-
 
 from datetime import datetime
 
@@ -76,8 +69,6 @@ def user_input(user_question, model_name, api_key, pdf_docs, conversation_histor
         pdf_names = [pdf.name for pdf in pdf_docs] if pdf_docs else []
         conversation_history.append((user_question_output, response_output, model_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ", ".join(pdf_names)))
 
-        # conversation_history.append((user_question_output, response_output, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), ", ".join(pdf_names)))
-
     # Display the conversation history
     st.markdown(
         f"""
@@ -130,12 +121,11 @@ def user_input(user_question, model_name, api_key, pdf_docs, conversation_histor
         """,
         unsafe_allow_html=True
     )
-            # <div class="info" style="margin-left: 20px;">Timestamp: {datetime.now()}</div>
-            # <div class="info" style="margin-left: 20px;">PDF Name: {", ".join(pdf_names)}</div>
+    
     if len(conversation_history) == 1:
         conversation_history = []
     elif len(conversation_history) > 1 :
-        last_item = conversation_history[-1]  # 
+        last_item = conversation_history[-1]
         conversation_history.remove(last_item) 
     for question, answer, model_name, timestamp, pdf_name in reversed(conversation_history):
         st.markdown(
@@ -155,25 +145,23 @@ def user_input(user_question, model_name, api_key, pdf_docs, conversation_histor
             """,
             unsafe_allow_html=True
         )
-                # <div class="info" style="margin-left: 20px;">Timestamp: {timestamp}</div>
-                # <div class="info" style="margin-left: 20px;">PDF Name: {pdf_name}</div>
 
     if len(st.session_state.conversation_history) > 0:
         df = pd.DataFrame(st.session_state.conversation_history, columns=["Question", "Answer", "Model", "Timestamp", "PDF Name"])
-
-        # df = pd.DataFrame(st.session_state.conversation_history, columns=["Question", "Answer", "Timestamp", "PDF Name"])
         csv = df.to_csv(index=False)
-        b64 = base64.b64encode(csv.encode()).decode()  # Convert to base64
+        b64 = base64.b64encode(csv.encode()).decode()
         href = f'<a href="data:file/csv;base64,{b64}" download="conversation_history.csv"><button>Download conversation history as CSV file</button></a>'
         st.sidebar.markdown(href, unsafe_allow_html=True)
         st.markdown("To download the conversation, click the Download button on the left side at the bottom of the conversation.")
     st.snow()
+
 def main():
     st.set_page_config(page_title="Read_Smart_AI", page_icon=":books:")
     st.header("Read_Smart_AI (v1) :books:")
 
     if 'conversation_history' not in st.session_state:
         st.session_state.conversation_history = []
+    
     linkedin_profile_link = "https://www.linkedin.com/in/helloisrael/"
     kaggle_profile_link = "https://www.kaggle.com/afolabiisrael/"
     github_profile_link = "https://github.com/EasyTechp5/"
@@ -184,9 +172,7 @@ def main():
         f"[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)]({github_profile_link})"
     )
 
-
-
-    model_name = st.sidebar.radio("Select the Model:", ( "Google AI"))
+    model_name = st.sidebar.radio("Select the Model:", ("Google AI",))
 
     api_key = None
 
@@ -198,7 +184,6 @@ def main():
             st.sidebar.warning("Please enter your Google API Key to proceed.")
             return
 
-   
     with st.sidebar:
         st.title("Menu:")
         
@@ -208,25 +193,20 @@ def main():
         clear_button = col1.button("Rerun")
 
         if reset_button:
-            st.session_state.conversation_history = []  # Clear conversation history
-            st.session_state.user_question = None  # Clear user question input 
-            
-            
-            api_key = None  # Reset Google API key
-            pdf_docs = None  # Reset PDF document
+            st.session_state.conversation_history = []
+            st.session_state.user_question = None
+            api_key = None
+            pdf_docs = None
             
         else:
             if clear_button:
                 if 'user_question' in st.session_state:
                     st.warning("The previous query will be discarded.")
-                    st.session_state.user_question = ""  # Temporarily clear user question input
+                    st.session_state.user_question = ""
                     if len(st.session_state.conversation_history) > 0:
-                        st.session_state.conversation_history.pop()  # Remove the last question-answer pair
+                        st.session_state.conversation_history.pop()
                 else:
                     st.warning("The question in the input will be queried again.")
-
-
-
 
         pdf_docs = st.file_uploader("Upload your PDF Files and Click on the Submit & Process Button", accept_multiple_files=True)
         if st.button("Submit & Process"):
@@ -240,7 +220,7 @@ def main():
 
     if user_question:
         user_input(user_question, model_name, api_key, pdf_docs, st.session_state.conversation_history)
-        st.session_state.user_question = ""  # Clear user question input 
+        st.session_state.user_question = ""
 
 if __name__ == "__main__":
     main()
